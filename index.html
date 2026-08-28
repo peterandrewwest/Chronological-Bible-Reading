@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -57,10 +57,27 @@
         }
         .cs-close:hover { color: #ddd; }
         .cs-body { overflow: auto; padding: 1rem 1.25rem 0.4rem; flex: 1; }
+        .cs-citation-row {
+            display: flex; align-items: center; gap: 0.7rem;
+            margin: 0 0 0.85rem;
+        }
         .cs-citation {
             color: #4a6da7; font-size: 1.35rem; font-weight: 700;
-            margin: 0 0 0.85rem; font-family: 'Noto Sans', Arial, sans-serif;
+            margin: 0; font-family: 'Noto Sans', Arial, sans-serif;
+            flex: 1;
         }
+        .cs-play {
+            flex-shrink: 0; width: 2.15rem; height: 2.15rem;
+            border: 1px solid #c8c8c8; border-radius: 4px;
+            background: #f4f4f4; color: #333;
+            cursor: pointer; padding: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        .cs-play:hover { background: #e9e9e9; }
+        .cs-play:disabled { opacity: 0.45; cursor: default; }
+        .cs-play svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
+        .cs-play.is-playing { background: #e6f0fa; border-color: #4a6da7; color: #005B96; }
+        .cs-play.is-loading { opacity: 0.65; }
         .cs-verses { color: #111; font-size: 1.12rem; line-height: 1.6; }
         .cs-verses .chapterNum {
             color: #4a6da7; font-size: 1.85rem; font-weight: 700; margin-right: 0.12em;
@@ -546,9 +563,16 @@
                 <button type="button" class="cs-close" id="csClose" aria-label="Close">&times;</button>
             </div>
             <div class="cs-body">
-                <h2 class="cs-citation" id="csCitation"></h2>
+                <div class="cs-citation-row">
+                    <h2 class="cs-citation" id="csCitation"></h2>
+                    <button type="button" class="cs-play" id="csPlay" aria-label="Play audio">
+                        <svg class="cs-icon-play" viewBox="0 0 24 24" aria-hidden="true"><polygon points="8,5 20,12 8,19"></polygon></svg>
+                        <svg class="cs-icon-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><rect x="6" y="5" width="4" height="14"></rect><rect x="14" y="5" width="4" height="14"></rect></svg>
+                    </button>
+                </div>
                 <div class="cs-verses" id="csVerses"></div>
             </div>
+            <audio id="csAudio" preload="auto"></audio>
             <div class="cs-footer">
                 <a id="csFooterLink" href="#" target="_blank" rel="noopener">New World Translation (Study Edition)</a>
             </div>
@@ -604,6 +628,166 @@
             const versesEl = document.getElementById('csVerses');
             const footerLink = document.getElementById('csFooterLink');
             const closeBtn = document.getElementById('csClose');
+            const playBtn = document.getElementById('csPlay');
+            const playIcon = playBtn.querySelector('.cs-icon-play');
+            const pauseIcon = playBtn.querySelector('.cs-icon-pause');
+            const audioEl = document.getElementById('csAudio');
+            const audioCache = {};
+            let audioClips = [];
+            let audioClipIndex = 0;
+            let audioRangeId = null;
+            let audioWanted = false;
+
+            function parseVerseId(id) {
+                const s = String(id);
+                return {
+                    book: parseInt(s.slice(0, -6), 10),
+                    chapter: parseInt(s.slice(-6, -3), 10),
+                    verse: parseInt(s.slice(-3), 10)
+                };
+            }
+
+            function parseClock(value) {
+                const p = String(value || '0').split(':');
+                if (p.length === 3) return (+p[0]) * 3600 + (+p[1]) * 60 + parseFloat(p[2]);
+                if (p.length === 2) return (+p[0]) * 60 + parseFloat(p[1]);
+                return parseFloat(p[0]) || 0;
+            }
+
+            function setPlayState(state) {
+                playBtn.classList.toggle('is-playing', state === 'playing');
+                playBtn.classList.toggle('is-loading', state === 'loading');
+                playBtn.disabled = state === 'unavailable';
+                const paused = state !== 'playing';
+                playIcon.hidden = !paused;
+                pauseIcon.hidden = paused;
+                playBtn.setAttribute('aria-label', state === 'playing' ? 'Pause audio' : 'Play audio');
+            }
+
+            function stopAudio() {
+                audioWanted = false;
+                audioEl.pause();
+                audioEl.removeAttribute('src');
+                audioEl.load();
+                audioClips = [];
+                audioClipIndex = 0;
+                setPlayState('idle');
+            }
+
+            async function fetchChapterAudio(book, chapter) {
+                const key = book + ':' + chapter;
+                if (audioCache[key]) return audioCache[key];
+                const url = 'https://b.jw-cdn.org/apis/pub-media/GETPUBMEDIALINKS?output=json&pub=nwt&fileformat=MP3&alllangs=0&langwritten=E&txtCMSLang=E&booknum=' + book + '&track=' + chapter;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('audio ' + res.status);
+                const data = await res.json();
+                const files = data.files && data.files.E && data.files.E.MP3;
+                if (!files || !files.length || !files[0].file || !files[0].file.url) throw new Error('no mp3');
+                const markers = (files[0].markers && files[0].markers.markers) || [];
+                audioCache[key] = { url: files[0].file.url, markers: markers };
+                return audioCache[key];
+            }
+
+            function clipForChapter(info, startVerse, endVerse) {
+                const marks = info.markers.slice().sort(function(a, b) { return a.verseNumber - b.verseNumber; });
+                if (!marks.length) return { url: info.url, start: 0, end: null };
+                const first = marks.find(function(m) { return m.verseNumber >= startVerse; }) || marks[0];
+                let last = marks[marks.length - 1];
+                if (endVerse < 999) {
+                    for (let i = marks.length - 1; i >= 0; i--) {
+                        if (marks[i].verseNumber <= endVerse) { last = marks[i]; break; }
+                    }
+                }
+                return {
+                    url: info.url,
+                    start: parseClock(first.startTime),
+                    end: parseClock(last.startTime) + parseClock(last.duration)
+                };
+            }
+
+            async function buildAudioClips(rangeId) {
+                const parts = String(rangeId).split('-');
+                const start = parseVerseId(parts[0]);
+                const end = parseVerseId(parts[1]);
+                const clips = [];
+                if (start.book !== end.book) {
+                    clips.push(clipForChapter(await fetchChapterAudio(start.book, start.chapter), start.verse, 999));
+                    if (!(end.book === start.book && end.chapter === start.chapter)) {
+                        clips.push(clipForChapter(await fetchChapterAudio(end.book, end.chapter), 1, end.verse));
+                    }
+                    return clips;
+                }
+                for (let ch = start.chapter; ch <= end.chapter; ch++) {
+                    const sv = ch === start.chapter ? start.verse : 1;
+                    const ev = ch === end.chapter ? end.verse : 999;
+                    clips.push(clipForChapter(await fetchChapterAudio(start.book, ch), sv, ev));
+                }
+                return clips;
+            }
+
+            function playClipAt(index) {
+                if (!audioWanted) return;
+                if (index >= audioClips.length) {
+                    setPlayState('idle');
+                    return;
+                }
+                audioClipIndex = index;
+                const clip = audioClips[index];
+                const onMeta = function() {
+                    audioEl.removeEventListener('loadedmetadata', onMeta);
+                    if (!audioWanted) return;
+                    try { audioEl.currentTime = clip.start; } catch (err) {}
+                    audioEl.play().then(function() { setPlayState('playing'); }).catch(function() { setPlayState('idle'); });
+                };
+                audioEl.pause();
+                audioEl.src = clip.url;
+                audioEl.addEventListener('loadedmetadata', onMeta);
+                audioEl.load();
+            }
+
+            audioEl.addEventListener('timeupdate', function() {
+                if (!audioWanted || !audioClips.length) return;
+                const clip = audioClips[audioClipIndex];
+                if (clip && clip.end && audioEl.currentTime >= clip.end - 0.08) {
+                    if (audioClipIndex + 1 < audioClips.length) playClipAt(audioClipIndex + 1);
+                    else {
+                        audioEl.pause();
+                        setPlayState('idle');
+                    }
+                }
+            });
+            audioEl.addEventListener('ended', function() {
+                if (!audioWanted) return;
+                if (audioClipIndex + 1 < audioClips.length) playClipAt(audioClipIndex + 1);
+                else setPlayState('idle');
+            });
+
+            playBtn.addEventListener('click', async function() {
+                if (!audioRangeId) return;
+                if (!audioEl.paused && audioClips.length) {
+                    audioWanted = false;
+                    audioEl.pause();
+                    setPlayState('idle');
+                    return;
+                }
+                if (audioClips.length && audioEl.src && audioEl.paused && audioEl.currentTime > 0) {
+                    audioWanted = true;
+                    audioEl.play().then(function() { setPlayState('playing'); }).catch(function() { setPlayState('idle'); });
+                    return;
+                }
+                audioWanted = true;
+                setPlayState('loading');
+                try {
+                    audioClips = await buildAudioClips(audioRangeId);
+                    if (!audioWanted) return;
+                    if (!audioClips.length) { setPlayState('unavailable'); return; }
+                    playClipAt(0);
+                } catch (err) {
+                    audioClips = [];
+                    setPlayState('unavailable');
+                    playBtn.title = 'Audio is not available for this reading';
+                }
+            });
 
             function rangeIdFromHref(href) {
                 const m = String(href || '').match(/#v(\d+)-v(\d+)/);
@@ -622,7 +806,11 @@
                 return root.innerHTML;
             }
 
-            function openCitedScripture(entry, fallbackHref) {
+            function openCitedScripture(entry, fallbackHref, rangeId) {
+                stopAudio();
+                audioRangeId = rangeId;
+                playBtn.title = '';
+                setPlayState('idle');
                 citationEl.innerHTML = entry.citation || '';
                 versesEl.innerHTML = sanitizeVerseHtml(entry.html || '');
                 footerLink.href = entry.link || fallbackHref || '#';
@@ -632,6 +820,7 @@
             }
 
             function closeCitedScripture() {
+                stopAudio();
                 overlay.hidden = true;
                 document.body.style.overflow = '';
             }
@@ -649,7 +838,7 @@
                     const cache = window.CITED_VERSES || {};
                     const entry = id ? cache[id] : null;
                     if (entry && entry.html) {
-                        openCitedScripture(entry, a.href);
+                        openCitedScripture(entry, a.href, id);
                     } else {
                         openJwPopup(a.href);
                     }
