@@ -637,6 +637,8 @@
             let audioClipIndex = 0;
             let audioRangeId = null;
             let audioWanted = false;
+            let audioAdvancing = false;
+            let audioMetaHandler = null;
 
             function parseVerseId(id) {
                 const s = String(id);
@@ -666,6 +668,11 @@
 
             function stopAudio() {
                 audioWanted = false;
+                audioAdvancing = false;
+                if (audioMetaHandler) {
+                    audioEl.removeEventListener('loadedmetadata', audioMetaHandler);
+                    audioMetaHandler = null;
+                }
                 audioEl.pause();
                 audioEl.removeAttribute('src');
                 audioEl.load();
@@ -711,9 +718,37 @@
                 const end = parseVerseId(parts[1]);
                 const clips = [];
                 if (start.book !== end.book) {
-                    clips.push(clipForChapter(await fetchChapterAudio(start.book, start.chapter), start.verse, 999));
-                    if (!(end.book === start.book && end.chapter === start.chapter)) {
-                        clips.push(clipForChapter(await fetchChapterAudio(end.book, end.chapter), 1, end.verse));
+                    // Start book: from start chapter/verse through last available chapter
+                    let ch = start.chapter;
+                    while (true) {
+                        try {
+                            const info = await fetchChapterAudio(start.book, ch);
+                            const sv = ch === start.chapter ? start.verse : 1;
+                            clips.push(clipForChapter(info, sv, 999));
+                            ch++;
+                            if (ch > 200) break;
+                        } catch (err) {
+                            break;
+                        }
+                    }
+                    // Middle books, if any
+                    for (let book = start.book + 1; book < end.book; book++) {
+                        let mid = 1;
+                        while (mid <= 200) {
+                            try {
+                                const info = await fetchChapterAudio(book, mid);
+                                clips.push(clipForChapter(info, 1, 999));
+                                mid++;
+                            } catch (err) {
+                                break;
+                            }
+                        }
+                    }
+                    // End book: chapters 1..end.chapter
+                    for (let ch = 1; ch <= end.chapter; ch++) {
+                        const info = await fetchChapterAudio(end.book, ch);
+                        const ev = ch === end.chapter ? end.verse : 999;
+                        clips.push(clipForChapter(info, 1, ev));
                     }
                     return clips;
                 }
@@ -728,38 +763,86 @@
             function playClipAt(index) {
                 if (!audioWanted) return;
                 if (index >= audioClips.length) {
+                    audioAdvancing = false;
                     setPlayState('idle');
                     return;
                 }
+                audioAdvancing = true;
                 audioClipIndex = index;
                 const clip = audioClips[index];
-                const onMeta = function() {
-                    audioEl.removeEventListener('loadedmetadata', onMeta);
+                if (audioMetaHandler) {
+                    audioEl.removeEventListener('loadedmetadata', audioMetaHandler);
+                    audioMetaHandler = null;
+                }
+                let started = false;
+                const finish = function() {
+                    if (started || !audioWanted) return;
+                    started = true;
+                    audioAdvancing = false;
+                    audioEl.play().then(function() { setPlayState('playing'); }).catch(function() {
+                        setPlayState('idle');
+                    });
+                };
+                audioMetaHandler = function() {
+                    audioEl.removeEventListener('loadedmetadata', audioMetaHandler);
+                    audioMetaHandler = null;
                     if (!audioWanted) return;
-                    try { audioEl.currentTime = clip.start; } catch (err) {}
-                    audioEl.play().then(function() { setPlayState('playing'); }).catch(function() { setPlayState('idle'); });
+                    const startAt = clip.start || 0;
+                    try {
+                        if (Math.abs((audioEl.currentTime || 0) - startAt) > 0.15) {
+                            const onSeeked = function() {
+                                audioEl.removeEventListener('seeked', onSeeked);
+                                finish();
+                            };
+                            audioEl.addEventListener('seeked', onSeeked);
+                            audioEl.currentTime = startAt;
+                            setTimeout(function() {
+                                audioEl.removeEventListener('seeked', onSeeked);
+                                finish();
+                            }, 500);
+                        } else {
+                            finish();
+                        }
+                    } catch (err) {
+                        finish();
+                    }
                 };
                 audioEl.pause();
-                audioEl.src = clip.url;
-                audioEl.addEventListener('loadedmetadata', onMeta);
-                audioEl.load();
+                const absolute = clip.url;
+                if (audioEl.getAttribute('src') !== absolute && audioEl.src !== absolute) {
+                    audioEl.src = absolute;
+                    audioEl.addEventListener('loadedmetadata', audioMetaHandler);
+                    audioEl.load();
+                } else if (audioEl.readyState >= 1) {
+                    audioMetaHandler();
+                } else {
+                    audioEl.addEventListener('loadedmetadata', audioMetaHandler);
+                }
+            }
+
+            function advanceAudio() {
+                if (!audioWanted || audioAdvancing || !audioClips.length) return;
+                if (audioClipIndex + 1 < audioClips.length) {
+                    audioAdvancing = true;
+                    audioEl.pause();
+                    playClipAt(audioClipIndex + 1);
+                } else {
+                    audioWanted = false;
+                    audioEl.pause();
+                    setPlayState('idle');
+                }
             }
 
             audioEl.addEventListener('timeupdate', function() {
-                if (!audioWanted || !audioClips.length) return;
+                if (!audioWanted || audioAdvancing || !audioClips.length) return;
                 const clip = audioClips[audioClipIndex];
-                if (clip && clip.end && audioEl.currentTime >= clip.end - 0.08) {
-                    if (audioClipIndex + 1 < audioClips.length) playClipAt(audioClipIndex + 1);
-                    else {
-                        audioEl.pause();
-                        setPlayState('idle');
-                    }
+                if (clip && clip.end != null && audioEl.currentTime >= clip.end - 0.05) {
+                    advanceAudio();
                 }
             });
             audioEl.addEventListener('ended', function() {
-                if (!audioWanted) return;
-                if (audioClipIndex + 1 < audioClips.length) playClipAt(audioClipIndex + 1);
-                else setPlayState('idle');
+                if (!audioWanted || audioAdvancing) return;
+                advanceAudio();
             });
 
             playBtn.addEventListener('click', async function() {
