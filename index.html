@@ -31,6 +31,7 @@
             h1 { font-size: 1.4rem; padding: 0.8rem; }
             summary { font-size: 1.15rem; padding: 0.9rem; }
             nav a { font-size: 0.85rem; padding: 0.4rem 0.7rem; }
+            .today-btn { font-size: 0.85rem; padding: 0.4rem 0.7rem; }
             .day { padding: 0.9rem; }
         }
 
@@ -93,17 +94,38 @@
         .cs-footer a { color: #4a6da7; text-decoration: none; }
         .cs-footer a:hover { text-decoration: underline; }
 
-        /* New-year reset prompt */
-        .ny-dialog { max-width: 420px; }
-        .ny-dialog .ny-header { background: #005B96; color: #fff; padding: 0.7rem 1rem; font-weight: 700; font-size: 1.05rem; }
-        .ny-dialog .ny-body { padding: 1rem 1.2rem 0.4rem; font-size: 1rem; }
-        .ny-dialog .ny-body p { margin: 0 0 0.7rem; }
-        .ny-actions { display: flex; justify-content: flex-end; gap: 0.6rem; padding: 0.6rem 1.2rem 1rem; flex-wrap: wrap; }
-        .ny-actions button { font: inherit; font-size: 0.95rem; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
-        .ny-later { background: #f4f4f4; border: 1px solid #c8c8c8; color: #333; }
-        .ny-later:hover { background: #e9e9e9; }
-        .ny-reset { background: #005B96; border: 1px solid #005B96; color: #fff; font-weight: 700; }
-        .ny-reset:hover { background: #003f6b; }
+        .cs-status { color: #555; font-size: 1rem; }
+        .cs-status a { color: #4a6da7; }
+        .cs-retry { font: inherit; font-size: 0.9rem; margin-left: 0.4rem; padding: 0.2rem 0.7rem; border: 1px solid #c8c8c8; border-radius: 4px; background: #f4f4f4; cursor: pointer; }
+
+        /* Yes/no dialog (new-year reset, import confirmation) */
+        .choice-dialog { max-width: 420px; }
+        .choice-dialog .choice-header { background: #005B96; color: #fff; padding: 0.7rem 1rem; font-weight: 700; font-size: 1.05rem; }
+        .choice-dialog .choice-body { padding: 1rem 1.2rem 0.4rem; font-size: 1rem; }
+        .choice-dialog .choice-body p { margin: 0 0 0.7rem; }
+        .choice-actions { display: flex; justify-content: flex-end; gap: 0.6rem; padding: 0.6rem 1.2rem 1rem; flex-wrap: wrap; }
+        .choice-actions button { font: inherit; font-size: 0.95rem; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
+        .choice-cancel { background: #f4f4f4; border: 1px solid #c8c8c8; color: #333; }
+        .choice-cancel:hover { background: #e9e9e9; }
+        .choice-confirm { background: #005B96; border: 1px solid #005B96; color: #fff; font-weight: 700; }
+        .choice-confirm:hover { background: #003f6b; }
+
+        /* Today button, backup toolbar, pace indicator, storage notice */
+        .today-btn { font: inherit; font-size: 0.95rem; font-weight: 700; color: #005B96; background: #fff; border: none; border-radius: 4px; padding: 0.5rem 0.9rem; cursor: pointer; }
+        .today-btn:hover { background: #e6f0fa; }
+        nav a:focus-visible, .today-btn:focus-visible, .toolbar button:focus-visible { outline: 3px solid #ffbf47; outline-offset: 1px; }
+        .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; margin: 0.8rem 1rem 0; font-size: 0.9rem; }
+        .toolbar button { font: inherit; color: #005B96; background: #fff; border: 1px solid #b8cfe4; border-radius: 4px; padding: 0.35rem 0.8rem; cursor: pointer; }
+        .toolbar button:hover { background: #e6f0fa; }
+        .toolbar-status { color: #555; margin-right: auto; }
+        .toolbar-status.is-error { color: #b00020; }
+        .storage-notice { margin: 0.8rem 1rem 0; padding: 0.4rem 0.8rem; background: #fff8e1; border-radius: 4px; font-size: 0.85rem; color: #6b5200; }
+        .storage-notice[hidden] { display: none; }
+        .day.is-flash { animation: today-flash 2s ease-out; }
+        @keyframes today-flash { 0%, 30% { background-color: #cfe2f5; } 100% { background-color: transparent; } }
+        .pace { margin-left: 0.6rem; color: #555; }
+        .pace.is-behind { color: #b35900; font-weight: 700; }
+        .pace.is-ahead, .pace.is-on-track { color: #2e7d32; font-weight: 700; }
     </style>
 </head>
 <body>
@@ -124,8 +146,18 @@
             <li><a href="#october">October</a></li>
             <li><a href="#november">November</a></li>
             <li><a href="#december">December</a></li>
+            <li><button type="button" class="today-btn" id="todayBtn">Today</button></li>
         </ul>
     </nav>
+
+    <p class="storage-notice" id="storageNotice" role="status" hidden>This browser is blocking storage, so your checkmarks won&rsquo;t be saved after you leave this page. Use &ldquo;Export progress&rdquo; to keep a copy.</p>
+
+    <div class="toolbar">
+        <span class="toolbar-status" id="backupStatus" role="status"></span>
+        <button type="button" id="exportBtn">Export progress</button>
+        <button type="button" id="importBtn">Import progress</button>
+        <input type="file" id="importFile" accept=".json,application/json" hidden>
+    </div>
 
     <section id="january">
         <details open>
@@ -566,7 +598,7 @@
     </section>
 
     <div class="progress-bar">
-        Progress: <span id="progress">0%</span>
+        Progress: <span id="progress">0%</span><span class="pace" id="pace"></span>
     </div>
     <div class="cs-overlay" id="csOverlay" hidden>
         <div class="cs-dialog" role="dialog" aria-modal="true" aria-labelledby="csTitle">
@@ -591,119 +623,299 @@
         </div>
     </div>
 
-    <div class="cs-overlay" id="nyOverlay" hidden>
-        <div class="cs-dialog ny-dialog" role="dialog" aria-modal="true" aria-labelledby="nyTitle" aria-describedby="nyBody">
-            <div class="ny-header" id="nyTitle">Happy New Year!</div>
-            <div class="ny-body" id="nyBody">
-                <p>A new calendar year (<strong id="nyYear"></strong>) has started.</p>
-                <p>Clear all checkmarks and start this year&rsquo;s reading from 0%?</p>
-            </div>
-            <div class="ny-actions">
-                <button type="button" class="ny-later" id="nyLater">Not now</button>
-                <button type="button" class="ny-reset" id="nyReset">Clear &amp; start new year</button>
+    <div class="cs-overlay" id="choiceOverlay" hidden>
+        <div class="cs-dialog choice-dialog" role="dialog" aria-modal="true" aria-labelledby="choiceTitle" aria-describedby="choiceBody">
+            <div class="choice-header" id="choiceTitle"></div>
+            <div class="choice-body" id="choiceBody"></div>
+            <div class="choice-actions">
+                <button type="button" class="choice-cancel" id="choiceCancel"></button>
+                <button type="button" class="choice-confirm" id="choiceConfirm"></button>
             </div>
         </div>
     </div>
 
-    <script src="cited-verses.js"></script>
-
     <script>
+        // localStorage wrapper. When storage is blocked (private browsing, blocked
+        // cookies, quota 0) it falls back to memory so the page keeps working.
+        const store = (function() {
+            const memory = {};
+            let persistent = true;
+            try {
+                localStorage.setItem('cbr-storage-test', '1');
+                localStorage.removeItem('cbr-storage-test');
+            } catch (err) {
+                persistent = false;
+            }
+            function fail() {
+                persistent = false;
+                const notice = document.getElementById('storageNotice');
+                if (notice) notice.hidden = false;
+            }
+            const has = key => Object.prototype.hasOwnProperty.call(memory, key);
+            return {
+                get isPersistent() { return persistent; },
+                get(key) {
+                    if (persistent) {
+                        try {
+                            const value = localStorage.getItem(key);
+                            if (value === null) delete memory[key]; else memory[key] = value;
+                            return value;
+                        } catch (err) { fail(); }
+                    }
+                    return has(key) ? memory[key] : null;
+                },
+                set(key, value) {
+                    memory[key] = String(value);
+                    if (persistent) {
+                        try { localStorage.setItem(key, String(value)); } catch (err) { fail(); }
+                    }
+                },
+                remove(key) {
+                    delete memory[key];
+                    if (persistent) {
+                        try { localStorage.removeItem(key); } catch (err) { fail(); }
+                    }
+                },
+                keys() {
+                    const keys = new Set(Object.keys(memory));
+                    if (persistent) {
+                        try { Object.keys(localStorage).forEach(k => keys.add(k)); } catch (err) { fail(); }
+                    }
+                    return Array.from(keys);
+                }
+            };
+        })();
+
         window.onload = function() {
             const today = new Date();
+            const year = today.getFullYear();
             const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
             const currentMonth = monthNames[today.getMonth()];
             const currentDay = today.getDate();
-
-            document.querySelectorAll('details').forEach(detail => {
-                if (detail.querySelector('summary').textContent.trim() === currentMonth) {
-                    detail.open = true;
-                }
-            });
-
-            document.querySelectorAll('.date').forEach(el => {
-                const txt = el.textContent.trim();
-                const search = `${currentMonth} ${currentDay}`;
-            if (txt === search || new RegExp(search + '(?![0-9])').test(txt)) {
-                    el.setAttribute('aria-current', 'date');
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            });
-
-            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-            // The Feb 29 box only counts toward progress in leap years.
-            const year = today.getFullYear();
             const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-            const countsTowardProgress = cb => isLeapYear || !cb.closest('.leap-day');
-            let checkedCount = 0;
-            const total = Array.from(checkboxes).filter(countsTowardProgress).length;
+            const RESET_KEY = 'cbr-reset-year';
+            const READING_KEY = /^d\d+[a-z]?$/;
+
+            if (!store.isPersistent) document.getElementById('storageNotice').hidden = false;
+
+            // ---- Today: every calendar date has an entry (Feb 29 is the leap-day entry) ----
+            const dateOf = el => el.closest('.day').querySelector('.date').textContent.trim();
+            const todayDay = Array.from(document.querySelectorAll('.day'))
+                .find(day => dateOf(day) === `${currentMonth} ${currentDay}`);
+            const todayDate = todayDay && todayDay.querySelector('.date');
+            if (todayDate) {
+                todayDate.setAttribute('aria-current', 'date');
+                todayDate.tabIndex = -1;
+            }
+            function goToToday(highlight) {
+                if (!todayDay) return;
+                todayDay.closest('details').open = true;
+                todayDay.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (highlight) {
+                    todayDay.classList.remove('is-flash');
+                    void todayDay.offsetWidth; // restart the animation on repeated clicks
+                    todayDay.classList.add('is-flash');
+                    todayDate.focus({ preventScroll: true });
+                }
+            }
+            goToToday(false);
+            document.getElementById('todayBtn').addEventListener('click', () => goToToday(true));
+
+            // ---- Checkmarks, progress and pace ----
+            const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+            // The Feb 29 box only counts toward progress in leap years.
+            const countedBoxes = checkboxes.filter(cb => isLeapYear || !cb.closest('.leap-day'));
+            // Counted readings scheduled on or before today.
+            const dueBoxes = countedBoxes.filter(cb => {
+                const [monthName, day] = dateOf(cb).split(' ');
+                const month = monthNames.indexOf(monthName);
+                return month < today.getMonth() || (month === today.getMonth() && Number(day) <= currentDay);
+            });
+            const progressEl = document.getElementById('progress');
+            const paceEl = document.getElementById('pace');
+
+            function refreshProgress() {
+                const done = countedBoxes.filter(cb => cb.checked).length;
+                // Round down so 100% is only shown when every counted reading is checked.
+                const pct = countedBoxes.length ? Math.floor((done / countedBoxes.length) * 100) : 0;
+                progressEl.textContent = `${pct}%`;
+                const diff = done - dueBoxes.length;
+                const n = Math.abs(diff);
+                const readings = n === 1 ? 'reading' : 'readings';
+                paceEl.textContent = diff === 0 ? 'On track' : `${n} ${readings} ${diff < 0 ? 'behind' : 'ahead'}`;
+                paceEl.className = 'pace ' + (diff === 0 ? 'is-on-track' : diff < 0 ? 'is-behind' : 'is-ahead');
+            }
+
+            function setChecked(cb, checked) {
+                cb.checked = checked;
+                toggleCompleted(cb);
+            }
+
+            function clearSavedChecks() {
+                store.keys().forEach(key => { if (READING_KEY.test(key)) store.remove(key); });
+            }
 
             checkboxes.forEach(cb => {
-                const saved = localStorage.getItem(cb.id) === 'true';
-                cb.checked = saved;
-                if (saved && countsTowardProgress(cb)) checkedCount++;
-                toggleCompleted(cb);
-
+                setChecked(cb, store.get(cb.id) === 'true');
                 cb.addEventListener('change', () => {
-                    localStorage.setItem(cb.id, cb.checked);
+                    store.set(cb.id, cb.checked);
                     toggleCompleted(cb);
-                    if (countsTowardProgress(cb)) checkedCount += cb.checked ? 1 : -1;
-                    updateProgress(checkedCount, total);
+                    refreshProgress();
                 });
             });
+            refreshProgress();
 
-            updateProgress(checkedCount, total);
+            // ---- Yes/no dialog: Escape = cancel, Tab stays on the two buttons ----
+            const choiceOverlay = document.getElementById('choiceOverlay');
+            const choiceCancel = document.getElementById('choiceCancel');
+            const choiceConfirm = document.getElementById('choiceConfirm');
+            function askChoice({ title, paragraphs, confirmText, cancelText }) {
+                document.getElementById('choiceTitle').textContent = title;
+                document.getElementById('choiceBody').replaceChildren(...paragraphs.map(text => {
+                    const p = document.createElement('p');
+                    p.textContent = text;
+                    return p;
+                }));
+                choiceConfirm.textContent = confirmText;
+                choiceCancel.textContent = cancelText;
+                const returnFocus = document.activeElement;
+                return new Promise(resolve => {
+                    const close = result => {
+                        choiceOverlay.hidden = true;
+                        document.body.style.overflow = '';
+                        document.removeEventListener('keydown', onKey);
+                        choiceCancel.removeEventListener('click', onCancel);
+                        choiceConfirm.removeEventListener('click', onConfirm);
+                        if (returnFocus && returnFocus !== document.body && returnFocus.focus) returnFocus.focus();
+                        resolve(result);
+                    };
+                    const onCancel = () => close(false);
+                    const onConfirm = () => close(true);
+                    const onKey = e => {
+                        if (e.key === 'Escape') { e.preventDefault(); close(false); }
+                        else if (e.key === 'Tab') {
+                            e.preventDefault();
+                            (document.activeElement === choiceCancel ? choiceConfirm : choiceCancel).focus();
+                        }
+                    };
+                    choiceCancel.addEventListener('click', onCancel);
+                    choiceConfirm.addEventListener('click', onConfirm);
+                    document.addEventListener('keydown', onKey);
+                    choiceOverlay.hidden = false;
+                    document.body.style.overflow = 'hidden';
+                    // Default focus on the harmless choice so a stray Enter changes nothing.
+                    choiceCancel.focus();
+                });
+            }
 
-            // New-calendar-year reset: offer to clear reading checkmarks once per new year.
-            (function newYearReset() {
-                const RESET_KEY = 'cbr-reset-year';
-                const thisYear = today.getFullYear();
-                const storedYear = parseInt(localStorage.getItem(RESET_KEY), 10);
-                if (isNaN(storedYear)) {
-                    localStorage.setItem(RESET_KEY, String(thisYear));
+            // ---- New calendar year: offer to clear checkmarks once per year ----
+            const storedYear = parseInt(store.get(RESET_KEY), 10);
+            if (isNaN(storedYear)) {
+                store.set(RESET_KEY, year);
+            } else if (year > storedYear) {
+                askChoice({
+                    title: 'Happy New Year!',
+                    paragraphs: [`A new calendar year (${year}) has started.`, 'Clear all checkmarks and start this year\u2019s reading from 0%?'],
+                    confirmText: 'Clear & start new year',
+                    cancelText: 'Not now'
+                }).then(ok => {
+                    if (!ok) return;
+                    clearSavedChecks();
+                    checkboxes.forEach(cb => setChecked(cb, false));
+                    refreshProgress();
+                    store.set(RESET_KEY, year);
+                });
+            }
+
+            // ---- Export / import progress ----
+            const EXPORT_APP = 'chronological-bible-reading';
+            const backupStatus = document.getElementById('backupStatus');
+            const importFile = document.getElementById('importFile');
+            function showBackupStatus(message, isError) {
+                backupStatus.textContent = message;
+                backupStatus.classList.toggle('is-error', Boolean(isError));
+            }
+            const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+            document.getElementById('exportBtn').addEventListener('click', () => {
+                const now = new Date();
+                const pad = n => String(n).padStart(2, '0');
+                const resetYear = parseInt(store.get(RESET_KEY), 10);
+                const data = {
+                    app: EXPORT_APP,
+                    version: 1,
+                    exportedAt: now.toISOString(),
+                    resetYear: isNaN(resetYear) ? null : resetYear,
+                    checked: checkboxes.filter(cb => cb.checked).map(cb => cb.id)
+                };
+                const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `bible-reading-progress-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.json`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                showBackupStatus(`Exported ${plural(data.checked.length, 'checkmark')}.`);
+            });
+
+            // Returns { checked: Set of ids on this page, resetYear, exportedAt } or throws.
+            function parseProgressFile(text) {
+                const data = JSON.parse(text);
+                if (!data || data.app !== EXPORT_APP || data.version !== 1 || !Array.isArray(data.checked)) {
+                    throw new Error('not a progress export');
+                }
+                if (!data.checked.every(id => typeof id === 'string' && READING_KEY.test(id))) {
+                    throw new Error('bad reading id');
+                }
+                const resetYear = data.resetYear == null ? null : Number(data.resetYear);
+                if (resetYear !== null && !(Number.isInteger(resetYear) && resetYear >= 2000 && resetYear <= 9999)) {
+                    throw new Error('bad resetYear');
+                }
+                const pageIds = new Set(checkboxes.map(cb => cb.id));
+                const exportedAt = new Date(data.exportedAt);
+                return {
+                    checked: new Set(data.checked.filter(id => pageIds.has(id))),
+                    resetYear: resetYear,
+                    exportedAt: isNaN(exportedAt) ? null : exportedAt
+                };
+            }
+
+            document.getElementById('importBtn').addEventListener('click', () => importFile.click());
+            importFile.addEventListener('change', async () => {
+                const file = importFile.files[0];
+                importFile.value = ''; // so choosing the same file again still fires 'change'
+                if (!file) return;
+                let imported;
+                try {
+                    if (file.size > 1024 * 1024) throw new Error('file too large');
+                    imported = parseProgressFile(await file.text());
+                } catch (err) {
+                    showBackupStatus('That file isn\u2019t a valid progress export. Nothing was changed.', true);
                     return;
                 }
-                if (thisYear <= storedYear) return;
-
-                const nyOverlay = document.getElementById('nyOverlay');
-                const laterBtn = document.getElementById('nyLater');
-                const resetBtn = document.getElementById('nyReset');
-                const closeDialog = () => {
-                    nyOverlay.hidden = true;
-                    document.body.style.overflow = '';
-                    document.removeEventListener('keydown', onKey);
-                };
-                // Modal keyboard handling: Escape = "Not now"; Tab stays on the two buttons.
-                const onKey = e => {
-                    if (e.key === 'Escape') { e.preventDefault(); closeDialog(); }
-                    else if (e.key === 'Tab') {
-                        e.preventDefault();
-                        (document.activeElement === laterBtn ? resetBtn : laterBtn).focus();
-                    }
-                };
-                document.getElementById('nyYear').textContent = thisYear;
-                nyOverlay.hidden = false;
-                document.body.style.overflow = 'hidden';
-                document.addEventListener('keydown', onKey);
-                // Default focus on the harmless choice so a stray Enter can't wipe progress.
-                laterBtn.focus();
-
-                laterBtn.addEventListener('click', closeDialog);
-                resetBtn.addEventListener('click', () => {
-                    checkboxes.forEach(cb => {
-                        localStorage.removeItem(cb.id);
-                        cb.checked = false;
-                        toggleCompleted(cb);
-                    });
-                    // Also drop any stale reading keys (ids like d12 / d356b) not on the page.
-                    Object.keys(localStorage).forEach(k => {
-                        if (/^d\d+[a-z]?$/.test(k)) localStorage.removeItem(k);
-                    });
-                    checkedCount = 0;
-                    updateProgress(checkedCount, total);
-                    localStorage.setItem(RESET_KEY, String(thisYear));
-                    closeDialog();
+                const current = checkboxes.filter(cb => cb.checked).length;
+                const ok = await askChoice({
+                    title: 'Import progress?',
+                    paragraphs: [
+                        `\u201c${file.name}\u201d has ${plural(imported.checked.size, 'checkmark')}` +
+                            (imported.exportedAt ? ` (exported ${imported.exportedAt.toLocaleDateString()}).` : '.'),
+                        `It will replace your current ${plural(current, 'checkmark')}.`
+                    ],
+                    confirmText: 'Replace my progress',
+                    cancelText: 'Cancel'
                 });
-            })();
+                if (!ok) { showBackupStatus('Import cancelled. Nothing was changed.'); return; }
+                clearSavedChecks();
+                checkboxes.forEach(cb => {
+                    const checked = imported.checked.has(cb.id);
+                    setChecked(cb, checked);
+                    if (checked) store.set(cb.id, true);
+                });
+                if (imported.resetYear !== null) store.set(RESET_KEY, imported.resetYear);
+                refreshProgress();
+                showBackupStatus(`Imported ${plural(imported.checked.size, 'checkmark')}.`);
+            });
 
             const overlay = document.getElementById('csOverlay');
             const citationEl = document.getElementById('csCitation');
@@ -946,20 +1158,86 @@
                 return root.innerHTML;
             }
 
-            function openCitedScripture(entry, fallbackHref, rangeId) {
+            // Verse text is split into one file per month (verses/<month>.js, built by
+            // tools/split-cited-verses.js) and loaded the first time that month is opened.
+            const verseChunkLoads = {};
+            function loadMonthVerses(month) {
+                window.CBR_VERSES = window.CBR_VERSES || {};
+                if (window.CBR_VERSES[month]) return Promise.resolve(window.CBR_VERSES[month]);
+                if (!verseChunkLoads[month]) {
+                    verseChunkLoads[month] = new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = `verses/${month}.js`;
+                        script.onload = () => {
+                            if (window.CBR_VERSES[month]) resolve(window.CBR_VERSES[month]);
+                            else reject(new Error('empty verse file'));
+                        };
+                        script.onerror = () => {
+                            script.remove();
+                            reject(new Error('could not load ' + script.src));
+                        };
+                        document.head.appendChild(script);
+                    }).catch(err => {
+                        delete verseChunkLoads[month]; // allow "Try again"
+                        throw err;
+                    });
+                }
+                return verseChunkLoads[month];
+            }
+
+            // Quietly preload this month's verses once the page is idle, so the
+            // first popup is instant. Failures are ignored; the popup retries.
+            const preloadCurrentMonth = () => loadMonthVerses(currentMonth.toLowerCase()).catch(() => {});
+            if ('requestIdleCallback' in window) requestIdleCallback(preloadCurrentMonth, { timeout: 3000 });
+            else setTimeout(preloadCurrentMonth, 1000);
+
+            let popupToken = 0;
+            function showVerses(link, rangeId, token) {
+                versesEl.innerHTML = '<p class="cs-status" role="status">Loading…</p>';
+                loadMonthVerses(link.closest('section').id).then(verses => {
+                    const entry = verses[rangeId];
+                    if (!entry || !entry.html) throw new Error('no verses for ' + rangeId);
+                    if (token !== popupToken) return; // popup closed or another reading opened
+                    citationEl.innerHTML = entry.citation || '';
+                    versesEl.innerHTML = sanitizeVerseHtml(entry.html);
+                    footerLink.href = entry.link || link.href;
+                }).catch(() => {
+                    if (token !== popupToken) return;
+                    const status = document.createElement('p');
+                    status.className = 'cs-status';
+                    status.setAttribute('role', 'alert');
+                    status.append('Couldn’t load this passage. ');
+                    const retry = document.createElement('button');
+                    retry.type = 'button';
+                    retry.className = 'cs-retry';
+                    retry.textContent = 'Try again';
+                    retry.addEventListener('click', () => { closeBtn.focus(); showVerses(link, rangeId, token); });
+                    const jw = document.createElement('a');
+                    jw.href = link.href;
+                    jw.target = '_blank';
+                    jw.rel = 'noopener';
+                    jw.textContent = 'read it on jw.org';
+                    status.append(retry, ' or ', jw, '.');
+                    versesEl.replaceChildren(status);
+                });
+            }
+
+            function openCitedScripture(link, rangeId) {
+                const token = ++popupToken;
                 stopAudio();
                 audioRangeId = rangeId;
                 playBtn.title = '';
                 setPlayState('idle');
-                citationEl.innerHTML = entry.citation || '';
-                versesEl.innerHTML = sanitizeVerseHtml(entry.html || '');
-                footerLink.href = entry.link || fallbackHref || '#';
+                citationEl.textContent = link.textContent;
+                footerLink.href = link.href;
                 overlay.hidden = false;
                 document.body.style.overflow = 'hidden';
                 closeBtn.focus();
+                showVerses(link, rangeId, token);
             }
 
             function closeCitedScripture() {
+                popupToken++;
                 stopAudio();
                 overlay.hidden = true;
                 document.body.style.overflow = '';
@@ -975,13 +1253,8 @@
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                     e.preventDefault();
                     const id = rangeIdFromHref(a.href);
-                    const cache = window.CITED_VERSES || {};
-                    const entry = id ? cache[id] : null;
-                    if (entry && entry.html) {
-                        openCitedScripture(entry, a.href, id);
-                    } else {
-                        openJwPopup(a.href);
-                    }
+                    if (id) openCitedScripture(a, id);
+                    else openJwPopup(a.href);
                 });
             });
 
@@ -996,12 +1269,6 @@
             const span = checkbox.closest('label').querySelector('span');
             if (checkbox.checked) span.classList.add('completed');
             else span.classList.remove('completed');
-        }
-
-        function updateProgress(checked, total) {
-            // Round down so 100% is only shown when every counted reading is checked.
-            const pct = total > 0 ? Math.floor((checked / total) * 100) : 0;
-            document.getElementById('progress').textContent = `${pct}%`;
         }
     </script>
 
