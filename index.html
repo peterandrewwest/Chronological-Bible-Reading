@@ -592,9 +592,9 @@
     </div>
 
     <div class="cs-overlay" id="nyOverlay" hidden>
-        <div class="cs-dialog ny-dialog" role="dialog" aria-modal="true" aria-labelledby="nyTitle">
+        <div class="cs-dialog ny-dialog" role="dialog" aria-modal="true" aria-labelledby="nyTitle" aria-describedby="nyBody">
             <div class="ny-header" id="nyTitle">Happy New Year!</div>
-            <div class="ny-body">
+            <div class="ny-body" id="nyBody">
                 <p>A new calendar year (<strong id="nyYear"></strong>) has started.</p>
                 <p>Clear all checkmarks and start this year&rsquo;s reading from 0%?</p>
             </div>
@@ -630,19 +630,23 @@
             });
 
             const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            // The Feb 29 box only counts toward progress in leap years.
+            const year = today.getFullYear();
+            const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+            const countsTowardProgress = cb => isLeapYear || !cb.closest('.leap-day');
             let checkedCount = 0;
-            const total = checkboxes.length;
+            const total = Array.from(checkboxes).filter(countsTowardProgress).length;
 
             checkboxes.forEach(cb => {
                 const saved = localStorage.getItem(cb.id) === 'true';
                 cb.checked = saved;
-                if (saved) checkedCount++;
+                if (saved && countsTowardProgress(cb)) checkedCount++;
                 toggleCompleted(cb);
 
                 cb.addEventListener('change', () => {
                     localStorage.setItem(cb.id, cb.checked);
                     toggleCompleted(cb);
-                    checkedCount += cb.checked ? 1 : -1;
+                    if (countsTowardProgress(cb)) checkedCount += cb.checked ? 1 : -1;
                     updateProgress(checkedCount, total);
                 });
             });
@@ -661,14 +665,30 @@
                 if (thisYear <= storedYear) return;
 
                 const nyOverlay = document.getElementById('nyOverlay');
+                const laterBtn = document.getElementById('nyLater');
+                const resetBtn = document.getElementById('nyReset');
+                const closeDialog = () => {
+                    nyOverlay.hidden = true;
+                    document.body.style.overflow = '';
+                    document.removeEventListener('keydown', onKey);
+                };
+                // Modal keyboard handling: Escape = "Not now"; Tab stays on the two buttons.
+                const onKey = e => {
+                    if (e.key === 'Escape') { e.preventDefault(); closeDialog(); }
+                    else if (e.key === 'Tab') {
+                        e.preventDefault();
+                        (document.activeElement === laterBtn ? resetBtn : laterBtn).focus();
+                    }
+                };
                 document.getElementById('nyYear').textContent = thisYear;
                 nyOverlay.hidden = false;
-                document.getElementById('nyReset').focus();
+                document.body.style.overflow = 'hidden';
+                document.addEventListener('keydown', onKey);
+                // Default focus on the harmless choice so a stray Enter can't wipe progress.
+                laterBtn.focus();
 
-                document.getElementById('nyLater').addEventListener('click', () => {
-                    nyOverlay.hidden = true;
-                });
-                document.getElementById('nyReset').addEventListener('click', () => {
+                laterBtn.addEventListener('click', closeDialog);
+                resetBtn.addEventListener('click', () => {
                     checkboxes.forEach(cb => {
                         localStorage.removeItem(cb.id);
                         cb.checked = false;
@@ -681,7 +701,7 @@
                     checkedCount = 0;
                     updateProgress(checkedCount, total);
                     localStorage.setItem(RESET_KEY, String(thisYear));
-                    nyOverlay.hidden = true;
+                    closeDialog();
                 });
             })();
 
@@ -701,6 +721,7 @@
             let audioWanted = false;
             let audioAdvancing = false;
             let audioMetaHandler = null;
+            let audioPlayToken = 0;
 
             function parseVerseId(id) {
                 const s = String(id);
@@ -731,6 +752,7 @@
             function stopAudio() {
                 audioWanted = false;
                 audioAdvancing = false;
+                audioPlayToken++;
                 if (audioMetaHandler) {
                     audioEl.removeEventListener('loadedmetadata', audioMetaHandler);
                     audioMetaHandler = null;
@@ -778,42 +800,10 @@
                 const parts = String(rangeId).split('-');
                 const start = parseVerseId(parts[0]);
                 const end = parseVerseId(parts[1]);
+                // Every reading in the schedule stays within one book; a cross-book
+                // range would need chapter counts, so report it as unavailable.
+                if (start.book !== end.book) throw new Error('cross-book range');
                 const clips = [];
-                if (start.book !== end.book) {
-                    // Start book: from start chapter/verse through last available chapter
-                    let ch = start.chapter;
-                    while (true) {
-                        try {
-                            const info = await fetchChapterAudio(start.book, ch);
-                            const sv = ch === start.chapter ? start.verse : 1;
-                            clips.push(clipForChapter(info, sv, 999));
-                            ch++;
-                            if (ch > 200) break;
-                        } catch (err) {
-                            break;
-                        }
-                    }
-                    // Middle books, if any
-                    for (let book = start.book + 1; book < end.book; book++) {
-                        let mid = 1;
-                        while (mid <= 200) {
-                            try {
-                                const info = await fetchChapterAudio(book, mid);
-                                clips.push(clipForChapter(info, 1, 999));
-                                mid++;
-                            } catch (err) {
-                                break;
-                            }
-                        }
-                    }
-                    // End book: chapters 1..end.chapter
-                    for (let ch = 1; ch <= end.chapter; ch++) {
-                        const info = await fetchChapterAudio(end.book, ch);
-                        const ev = ch === end.chapter ? end.verse : 999;
-                        clips.push(clipForChapter(info, 1, ev));
-                    }
-                    return clips;
-                }
                 for (let ch = start.chapter; ch <= end.chapter; ch++) {
                     const sv = ch === start.chapter ? start.verse : 1;
                     const ev = ch === end.chapter ? end.verse : 999;
@@ -837,8 +827,10 @@
                     audioMetaHandler = null;
                 }
                 let started = false;
+                const token = ++audioPlayToken;
                 const finish = function() {
-                    if (started || !audioWanted) return;
+                    // Ignore late seeked/timeout callbacks from an earlier clip.
+                    if (started || !audioWanted || token !== audioPlayToken) return;
                     started = true;
                     audioAdvancing = false;
                     audioEl.play().then(function() { setPlayState('playing'); }).catch(function() {
@@ -870,9 +862,8 @@
                     }
                 };
                 audioEl.pause();
-                const absolute = clip.url;
-                if (audioEl.getAttribute('src') !== absolute && audioEl.src !== absolute) {
-                    audioEl.src = absolute;
+                if (audioEl.getAttribute('src') !== clip.url && audioEl.src !== clip.url) {
+                    audioEl.src = clip.url;
                     audioEl.addEventListener('loadedmetadata', audioMetaHandler);
                     audioEl.load();
                 } else if (audioEl.readyState >= 1) {
@@ -889,8 +880,12 @@
                     audioEl.pause();
                     playClipAt(audioClipIndex + 1);
                 } else {
+                    // Finished the whole reading: drop the clip list so the next
+                    // click on Play starts again from the beginning.
                     audioWanted = false;
                     audioEl.pause();
+                    audioClips = [];
+                    audioClipIndex = 0;
                     setPlayState('idle');
                 }
             }
@@ -1004,7 +999,8 @@
         }
 
         function updateProgress(checked, total) {
-            const pct = total > 0 ? Math.round((checked / total) * 100) : 0;
+            // Round down so 100% is only shown when every counted reading is checked.
+            const pct = total > 0 ? Math.floor((checked / total) * 100) : 0;
             document.getElementById('progress').textContent = `${pct}%`;
         }
     </script>
